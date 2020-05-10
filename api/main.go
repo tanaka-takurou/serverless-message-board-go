@@ -70,15 +70,25 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		switch v {
 		case "createroom" :
 			log.Print("Create Room.")
-			if v, ok := d["subject"]; ok {
-				err = putRoom(v)
+			if _, ok := d["subject"]; ok {
+				if v, ok := d["token"]; ok {
+					if checkToken(v) {
+						err = putRoom(d["subject"])
+						deleteToken(v)
+					}
+				}
 			}
 		case "addmessage" :
 			log.Print("Add Message.")
 			room_id, err = strconv.Atoi(d["room_id"])
 			icon_id, _ := strconv.Atoi(d["icon"])
 			if err == nil {
-				err = putMessage(room_id, d["user"], d["message"], icon_id)
+				if v, ok := d["token"]; ok {
+					if checkToken(v) {
+						err = putMessage(room_id, d["user"], d["message"], icon_id)
+						deleteToken(v)
+					}
+				}
 			}
 		case "updatemessage" :
 			log.Print("Update Message.")
@@ -335,6 +345,33 @@ func checkToken(token string) bool {
 		return true
 	}
 	return false
+}
+
+func delete(tableName string, key map[string]*dynamodb.AttributeValue) error {
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+	}))
+	svc := dynamodb.New(sess)
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String(tableName),
+		Key: key,
+	}
+
+	_, err := svc.DeleteItem(input)
+	return err
+}
+
+func deleteToken(token string) error {
+	key := map[string]*dynamodb.AttributeValue{
+		"token": {
+			S: aws.String(token),
+		},
+	}
+	err := delete(tokenTableName, key)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {

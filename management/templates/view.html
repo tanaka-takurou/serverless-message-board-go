@@ -53,22 +53,12 @@ $(document).ready(function() {
 });
 function CreateRoom(url) {
   $('.fullscreen.modal').modal('show');
-  if (App.token.length <= 0) {
-    GetToken(url);
-  } else {
-    SetFormValueToken(App.token);
-  }
 }
 function AddMessage(url) {
   $('.fullscreen.modal').modal('show');
   $('.ui.radio.checkbox')
     .checkbox()
   ;
-  if (App.token.length <= 0) {
-    GetToken(url);
-  } else {
-    SetFormValueToken(App.token);
-  }
 }
 function CloseModal() {
   $('.fullscreen.modal').modal('hide');
