@@ -1,0 +1,57 @@
+{{define "contents"}}
+{{ $roomlength := len .RoomList }}
+  {{ if gt $roomlength 0 }}
+    <div class="ui unstackable items">
+      {{ range .RoomList }}
+      <div class="item">
+        <div class="image">
+          <a class="header" href="/PRODUCT?room_id={{ .Room_Id }}">
+            <img src="{{template "enter.jpg" .}}">
+          </a>
+        </div>
+        <div class="content">
+          <a class="header" href="/PRODUCT?room_id={{ .Room_Id }}">{{ .Subject }}</a>
+          {{ if gt .Messages 0 }}
+          <div class="meta">
+            <span>Last Message: at {{ .Updated }}</span>
+          </div>
+          <div class="description">{{ .Last_Message }}</div>
+          {{ end }}
+          <div class="extra">
+            <i class="comment outline icon"></i><a>{{ .Messages }}</a>
+          </div>
+        </div>
+      </div>
+      {{ end }}
+    </div>
+  {{ end }}
+  <button class="ui primary button" onclick="CreateRoom({{ .Api }});">
+      Create Room
+    </button>
+    <div class="ui dimmer modals page transition hidden">
+      <div class="ui fullscreen modal transition hidden" style="left: auto !important;">
+        <form class="ui fullscreen modal" method="POST">
+          <i class="close icon"></i>
+          <div class="header">
+            New Room
+          </div>
+          <div class="content">
+            <div class="ui form">
+              <div class="field">
+                <label>Subject</label>
+                <div class="ui input">
+                  <input type="text" name="subject">
+                </div>
+              </div>
+            </div>
+          </div>
+          <input type="hidden" name="action" value="createroom">
+          <input id="token" type="hidden" name="token" value="">
+          <div class="actions">
+            <div class="ui button" onclick="CloseModal();">Cancel</div>
+            <div class="ui green button" onclick="SubmitForm(this, {{ .Api }});">Add</div>
+          </div>
+        </form>
+      </div>
+    </div>
+{{ end }}

@@ -1,0 +1,64 @@
+{{define "contents"}}
+{{ $roomlength := len .RoomList }}
+  {{ if gt $roomlength 0 }}
+    <h3 class="ui center aligned header">Rooms</h3>
+    <div class="ui divided list">
+    {{ range .RoomList }}
+      <div class="item">
+        <div class="right floated content">
+          <form class="ui content" method="POST">
+            <input type="hidden" name="action" value="updateroom">
+            <input type="hidden" name="room_id" value="{{ .Room_Id }}">
+            {{ if eq .Status 0 }}
+            <input type="hidden" name="status" value="1">
+            <div class="ui red button" onclick="SubmitForm(this)">Hide</div>
+            {{ else }}
+            <input type="hidden" name="status" value="0">
+            <div class="ui green button" onclick="SubmitForm(this)">Show</div>
+            {{ end }}
+          </form>
+        </div>
+        <i class="large clipboard outline middle aligned icon"></i>
+        <div class="content">
+          <a class="header" href="/?room_id={{ .Room_Id }}">{{ .Subject }}</a>
+          {{ if gt .Messages 0 }}
+          <div class="description">{{ .Last_Message }}&nbsp;({{ .Last_User }})</div>
+          {{ end }}
+          <div class="meta">
+            <i class="comment outline icon"></i><a>{{ .Messages }}</a>
+          </div>
+        </div>
+      </div>
+    {{ end }}
+    </div>
+  {{ end }}
+    <button class="ui primary button" onclick="CreateRoom();">
+      Create Room
+    </button>
+{{template "tokens" .}}
+    <div class="ui dimmer modals page transition hidden">
+      <div class="ui fullscreen modal transition hidden" style="left: auto !important;">
+        <form class="ui fullscreen modal" method="POST">
+          <i class="close icon"></i>
+          <div class="header">
+            New Room
+          </div>
+          <div class="content">
+            <div class="ui form">
+              <div class="field">
+                <label>Subject</label>
+                <div class="ui input">
+                  <input type="text" name="subject">
+                </div>
+              </div>
+            </div>
+          </div>
+          <input type="hidden" name="action" value="createroom">
+          <div class="actions">
+            <div class="ui button" onclick="CloseModal();">Cancel</div>
+            <div class="ui green button" onclick="SubmitForm(this)">Create</div>
+          </div>
+        </form>
+      </div>
+    </div>
+{{ end }}
