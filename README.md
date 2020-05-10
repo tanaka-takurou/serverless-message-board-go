@@ -47,8 +47,11 @@ Partition key Type: String
 
 ### Deploy
 Open scripts/deploy.sh and edit 'your_function_name'.
+
 Open api/scripts/deploy.sh and edit 'your_api_function_name'.
+
 Open constant/constant.json and edit 'your_api_url'.
+
 
 Then run this command.
 
