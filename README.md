@@ -4,6 +4,7 @@ Simple kit for serverless message board using AWS Lambda.
 
 ## Dependence
 - aws-lambda-go
+- aws-sdk-go
 
 
 ## Requirements
