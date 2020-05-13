@@ -57,7 +57,6 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	var room_id int
 	var message_id int
 	var err error
-	hash, err := bcrypt.GenerateFromPassword([]byte("salt1"), bcrypt.DefaultCost)
 	d := make(map[string]string)
 	json.Unmarshal([]byte(request.Body), &d)
 	if err == nil {
@@ -98,6 +97,14 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 					err = updateMessage(message_id, 1, "status")
 				}
 			}
+		case "puttoken" :
+			hash, err := bcrypt.GenerateFromPassword([]byte("salt1"), bcrypt.DefaultCost)
+			if err == nil {
+				err = putToken(string(hash))
+				if err == nil {
+					jsonBytes, err = json.Marshal(TokenResponse{Token:string(hash)})
+				}
+			}
 		}
 	}
 	if err != nil {
@@ -105,9 +112,13 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	} else {
 		log.Print(request.RequestContext.Identity.SourceIP)
 	}
+	responseBody := ""
+	if len(jsonBytes) > 0 {
+		responseBody = string(jsonBytes)
+	}
 	return Response {
 		StatusCode: 200,
-		Body: string(jsonBytes),
+		Body: responseBody,
 	}, nil
 }
 

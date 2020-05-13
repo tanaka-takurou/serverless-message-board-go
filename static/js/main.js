@@ -91,9 +91,14 @@ function Report(elm, url) {
   });
 }
 function GetToken(url) {
+  const data = {action: 'puttoken'};
   $.ajax({
-    type: 'POST',
-    url: url
+    type:          'POST',
+    dataType:      'json',
+    contentType:   'application/json',
+    scriptCharset: 'utf-8',
+    data:          JSON.stringify(data),
+    url:           url
   })
   .done(function(res) {
     App.token = res.token;
