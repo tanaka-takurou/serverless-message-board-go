@@ -5,6 +5,7 @@ import (
 	"time"
 	"context"
 	"strconv"
+	"io/ioutil"
 	"encoding/json"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/aws/aws-sdk-go/aws"
@@ -45,35 +46,35 @@ type TokenResponse struct {
 	Token     string `json:"token"`
 }
 
+type ConstantData struct {
+	RoomTableName    string `json:"roomTableName"`
+	MessageTableName string `json:"messageTableName"`
+	TokenTableName   string `json:"tokenTableName"`
+}
+
 type Response events.APIGatewayProxyResponse
 
-const messageTableName string = "sample_message"
-const roomTableName string = "sample_room"
-const tokenTableName string = "sample_token"
-const layout = "2006-01-02 15:04"
+const layout string = "2006-01-02 15:04"
 
 func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (Response, error) {
 	var jsonBytes []byte
 	var room_id int
 	var message_id int
 	var err error
+	jsonString, _ := ioutil.ReadFile("constant/constant.json")
+	constant := new(ConstantData)
+	json.Unmarshal(jsonString, constant)
 	d := make(map[string]string)
 	json.Unmarshal([]byte(request.Body), &d)
-	if err == nil {
-		err = putToken(string(hash))
-		if err == nil {
-			jsonBytes, err = json.Marshal(TokenResponse{Token:string(hash)})
-		}
-	}
 	if v, ok := d["action"]; ok {
 		switch v {
 		case "createroom" :
 			log.Print("Create Room.")
 			if _, ok := d["subject"]; ok {
 				if v, ok := d["token"]; ok {
-					if checkToken(v) {
-						err = putRoom(d["subject"])
-						deleteToken(v)
+					if checkToken(constant.TokenTableName, v) {
+						err = putRoom(constant.RoomTableName, d["subject"])
+						deleteToken(constant.TokenTableName, v)
 					}
 				}
 			}
@@ -83,9 +84,9 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			icon_id, _ := strconv.Atoi(d["icon"])
 			if err == nil {
 				if v, ok := d["token"]; ok {
-					if checkToken(v) {
-						err = putMessage(room_id, d["user"], d["message"], icon_id)
-						deleteToken(v)
+					if checkToken(constant.TokenTableName, v) {
+						err = putMessage(constant.MessageTableName, constant.RoomTableName, room_id, d["user"], d["message"], icon_id)
+						deleteToken(constant.TokenTableName, v)
 					}
 				}
 			}
@@ -94,13 +95,13 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			if _, ok := d["message_id"]; ok {
 				message_id, err = strconv.Atoi(d["message_id"])
 				if err == nil {
-					err = updateMessage(message_id, 1, "status")
+					err = updateMessage(constant.MessageTableName, message_id, 1, "status")
 				}
 			}
 		case "puttoken" :
 			hash, err := bcrypt.GenerateFromPassword([]byte("salt1"), bcrypt.DefaultCost)
 			if err == nil {
-				err = putToken(string(hash))
+				err = putToken(constant.TokenTableName, string(hash))
 				if err == nil {
 					jsonBytes, err = json.Marshal(TokenResponse{Token:string(hash)})
 				}
@@ -109,8 +110,6 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	}
 	if err != nil {
 		return Response{}, err
-	} else {
-		log.Print(request.RequestContext.Identity.SourceIP)
 	}
 	responseBody := ""
 	if len(jsonBytes) > 0 {
@@ -154,7 +153,7 @@ func put(tableName string, av map[string]*dynamodb.AttributeValue) error {
 	return err
 }
 
-func putToken(token string) error {
+func putToken(tokenTableName string, token string) error {
 	t := time.Now()
 	item := TokenData {
 		Token: token,
@@ -206,7 +205,7 @@ func update(tableName string, an map[string]*string, av map[string]*dynamodb.Att
 	return err
 }
 
-func updateRoom(room_id int, user string, message string, updated string) error {
+func updateRoom(roomTableName string, room_id int, user string, message string, updated string) error {
 	an := map[string]*string{
 		"#u": aws.String("last_user"),
 		"#m": aws.String("last_message"),
@@ -254,7 +253,7 @@ func updateRoom(room_id int, user string, message string, updated string) error 
 	return nil
 }
 
-func getMessageCount(room_id int)(*int64, error)  {
+func getMessageCount(messageTableName string, room_id int)(*int64, error)  {
 	result, err := scan(messageTableName, expression.Name("room_id").Equal(expression.Value(room_id)))
 	if err != nil {
 		return nil, err
@@ -262,7 +261,7 @@ func getMessageCount(room_id int)(*int64, error)  {
 	return result.ScannedCount, nil
 }
 
-func getRoomCount()(*int64, error)  {
+func getRoomCount(roomTableName string)(*int64, error)  {
 	result, err := scan(roomTableName, expression.NotEqual(expression.Name("status"), expression.Value(-1)))
 	if err != nil {
 		return nil, err
@@ -270,9 +269,9 @@ func getRoomCount()(*int64, error)  {
 	return result.ScannedCount, nil
 }
 
-func putMessage(room_id int, user string, message string, icon_id int) error {
+func putMessage(messageTableName string, roomTableName string, room_id int, user string, message string, icon_id int) error {
 	t := time.Now()
-	count, err := getMessageCount(room_id)
+	count, err := getMessageCount(messageTableName, room_id)
 	if err != nil {
 		return err
 	}
@@ -293,13 +292,13 @@ func putMessage(room_id int, user string, message string, icon_id int) error {
 	if err != nil {
 		return err
 	}
-	_ = updateRoom(room_id, user, message, t.Format(layout))
+	_ = updateRoom(roomTableName, room_id, user, message, t.Format(layout))
 	return nil
 }
 
-func putRoom(subject string) error {
+func putRoom(roomTableName string, subject string) error {
 	t := time.Now()
-	count, err := getRoomCount()
+	count, err := getRoomCount(roomTableName)
 	if err != nil {
 		return err
 	}
@@ -323,7 +322,7 @@ func putRoom(subject string) error {
 	return nil
 }
 
-func updateMessage(message_id int, value int, name string) error {
+func updateMessage(messageTableName string, message_id int, value int, name string) error {
 	an := map[string]*string{
 		"#s": aws.String(name),
 	}
@@ -345,7 +344,7 @@ func updateMessage(message_id int, value int, name string) error {
 	return nil
 }
 
-func checkToken(token string) bool {
+func checkToken(tokenTableName string, token string) bool {
 	item := struct {Token string `json:"token"`}{token}
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
@@ -372,7 +371,7 @@ func delete(tableName string, key map[string]*dynamodb.AttributeValue) error {
 	return err
 }
 
-func deleteToken(token string) error {
+func deleteToken(tokenTableName string, token string) error {
 	key := map[string]*dynamodb.AttributeValue{
 		"token": {
 			S: aws.String(token),

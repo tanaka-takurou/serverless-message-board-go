@@ -5,12 +5,12 @@
       {{ range .RoomList }}
       <div class="item">
         <div class="image">
-          <a class="header" href="/?room_id={{ .Room_Id }}">
+          <a class="header" href="./?room_id={{ .Room_Id }}">
             <img src="{{template "enter.jpg" .}}">
           </a>
         </div>
         <div class="content">
-          <a class="header" href="/?room_id={{ .Room_Id }}">{{ .Subject }}</a>
+          <a class="header" href="./?room_id={{ .Room_Id }}">{{ .Subject }}</a>
           {{ if gt .Messages 0 }}
           <div class="meta">
             <span>Last Message: at {{ .Updated }}</span>

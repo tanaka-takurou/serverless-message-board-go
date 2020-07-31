@@ -56,17 +56,16 @@ type TokenData struct {
 }
 
 type ConstantData struct {
-	Api       string `json:"api"`
-	Title     string `json:"title"`
-	Threshold int    `json:"threshold"`
+	Api              string `json:"api"`
+	Title            string `json:"title"`
+	Threshold        int    `json:"threshold"`
+	RoomTableName    string `json:"roomTableName"`
+	MessageTableName string `json:"messageTableName"`
 }
 
 type Response events.APIGatewayProxyResponse
 
-const messageTableName string = "message"
-const roomTableName    string = "room"
-const tokenTableName   string = "token"
-const layout           string = "2006-01-02 15:04"
+const layout string = "2006-01-02 15:04"
 
 func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (Response, error) {
 	templates := template.New("tmp")
@@ -95,11 +94,11 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	if len(s_room_id) > 0 {
 		room_id, err = strconv.Atoi(s_room_id)
 		if err == nil {
-			dat.Title = getRoomSubject(room_id)
+			dat.Title = getRoomSubject(constant.RoomTableName, room_id)
 			dat.RoomId = room_id
 			dat.MessagePage = 1
 			dat.RoomPage = 0
-			dat.MessageList, err = getMessageList(room_id, constant.Threshold)
+			dat.MessageList, err = getMessageList(constant.MessageTableName, room_id, constant.Threshold)
 			dat.RoomList = []RoomData{}
 			sort.Slice(dat.MessageList, func(i, j int) bool { return dat.MessageList[i].Created < dat.MessageList[j].Created })
 		}
@@ -110,7 +109,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		dat.MessagePage = 0
 		dat.RoomPage = 1
 		dat.MessageList = []MessageData{}
-		dat.RoomList, err = getRoomList()
+		dat.RoomList, err = getRoomList(constant.RoomTableName)
 		sort.Slice(dat.RoomList, func(i, j int) bool { return dat.RoomList[i].Updated > dat.RoomList[j].Updated })
 		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/room.html"))
 	}
@@ -170,9 +169,9 @@ func scan(tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutp
 	return svc.Scan(params)
 }
 
-func getMessageList(room_id int, threshold int)([]MessageData, error)  {
+func getMessageList(tableName string, room_id int, threshold int)([]MessageData, error)  {
 	var messageList []MessageData
-	result, err := scan(messageTableName, expression.Name("room_id").Equal(expression.Value(room_id)))
+	result, err := scan(tableName, expression.Name("room_id").Equal(expression.Value(room_id)))
 	if err != nil {
 		return nil, err
 	}
@@ -190,9 +189,9 @@ func getMessageList(room_id int, threshold int)([]MessageData, error)  {
 	return messageList, nil
 }
 
-func getRoomList()([]RoomData, error)  {
+func getRoomList(tableName string)([]RoomData, error)  {
 	var roomList []RoomData
-	result, err := scan(roomTableName, expression.Equal(expression.Name("status"), expression.Value(0)))
+	result, err := scan(tableName, expression.Equal(expression.Name("status"), expression.Value(0)))
 	if err != nil {
 		return nil, err
 	}
@@ -207,13 +206,13 @@ func getRoomList()([]RoomData, error)  {
 	return roomList, nil
 }
 
-func getRoomSubject(roomId int) string {
+func getRoomSubject(tableName string, roomId int) string {
 	item := struct {Room_Id int `json:"room_id"`}{roomId}
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
 		return ""
 	}
-	res, err := get(roomTableName, av, "subject")
+	res, err := get(tableName, av, "subject")
 	if err == nil && res.Item != nil{
 		result := struct {Subject string `json:"subject"`}{""}
 		err = dynamodbattribute.UnmarshalMap(res.Item, &result)

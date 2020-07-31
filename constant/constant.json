@@ -1,1 +1,1 @@
-{"title":"Sample Message Room", "threshold": 10, "api":"your_api_url"}
+{"title":"Sample Message Room", "threshold": 10, "api":"", "roomTableName":"sample_room", "messageTableName":"sample_message"}
