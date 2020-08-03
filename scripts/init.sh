@@ -135,6 +135,7 @@ aws lambda add-permission \
 	--action lambda:InvokeFunction \
 	--principal apigateway.amazonaws.com \
 	--source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$REST_API_ID/*/POST/api"
+cd `dirname $0`/../
 echo "{\"title\":\"Sample Message Room\", \"threshold\": 10, \"api\":\"https://$REST_API_ID.execute-api.$REGION.amazonaws.com/$STAGE_NAME/api\", \"roomTableName\":\"$ROOM_TABLE_NAME\", \"messageTableName\":\"$MESSAGE_TABLE_NAME\"}" > constant/constant.json
 echo 'Creating function.zip...'
 `dirname $0`/create_function.sh
