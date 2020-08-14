@@ -2,14 +2,13 @@ package main
 
 import (
 	"io"
+	"os"
 	"log"
 	"sort"
 	"bytes"
 	"context"
 	"strconv"
-	"io/ioutil"
 	"html/template"
-	"encoding/json"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
@@ -21,7 +20,7 @@ import (
 
 type PageData struct {
 	Title string
-	Api string
+	ApiPath string
 	RoomId int
 	MessagePage int
 	RoomPage int
@@ -66,6 +65,7 @@ type ConstantData struct {
 type Response events.APIGatewayProxyResponse
 
 const layout string = "2006-01-02 15:04"
+const title  string = "Sample Message Room"
 
 func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (Response, error) {
 	templates := template.New("tmp")
@@ -83,10 +83,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	}
 	buf := new(bytes.Buffer)
 	fw := io.Writer(buf)
-	jsonString, _ := ioutil.ReadFile("constant/constant.json")
-	constant := new(ConstantData)
-	json.Unmarshal(jsonString, constant)
-	dat.Api = constant.Api
+	dat.ApiPath = os.Getenv("API_PATH")
 	if err != nil {
 		log.Print(err)
 		panic(err)
@@ -94,22 +91,23 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	if len(s_room_id) > 0 {
 		room_id, err = strconv.Atoi(s_room_id)
 		if err == nil {
-			dat.Title = getRoomSubject(constant.RoomTableName, room_id)
+			dat.Title = getRoomSubject(os.Getenv("ROOM_TABLE_NAME"), room_id)
 			dat.RoomId = room_id
 			dat.MessagePage = 1
 			dat.RoomPage = 0
-			dat.MessageList, err = getMessageList(constant.MessageTableName, room_id, constant.Threshold)
+			threshold, _ := strconv.Atoi(os.Getenv("THRESHOLD"))
+			dat.MessageList, err = getMessageList(os.Getenv("MESSAGE_TABLE_NAME"), room_id, threshold)
 			dat.RoomList = []RoomData{}
 			sort.Slice(dat.MessageList, func(i, j int) bool { return dat.MessageList[i].Created < dat.MessageList[j].Created })
 		}
 		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/message.html"))
 	} else {
-		dat.Title = constant.Title
+		dat.Title = title
 		dat.RoomId = 0
 		dat.MessagePage = 0
 		dat.RoomPage = 1
 		dat.MessageList = []MessageData{}
-		dat.RoomList, err = getRoomList(constant.RoomTableName)
+		dat.RoomList, err = getRoomList(os.Getenv("ROOM_TABLE_NAME"))
 		sort.Slice(dat.RoomList, func(i, j int) bool { return dat.RoomList[i].Updated > dat.RoomList[j].Updated })
 		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/room.html"))
 	}
