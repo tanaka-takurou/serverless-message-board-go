@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Message Board
+
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: 'ServerlessMessageBoard'
+  RoomTableName:
+    Type: String
+    Default: 'sample_room'
+    Description: (Required) The name of the new DynamoDB to store connection identifiers for each connected clients. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+    AllowedPattern: ^[A-Za-z_]+$
+    ConstraintDescription: 'Required. Can be characters and underscore only. No numbers or special characters allowed.'
+  MessageTableName:
+    Type: String
+    Default: 'sample_message'
+    Description: (Required) The name of the new DynamoDB to store connection identifiers for each connected clients. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+    AllowedPattern: ^[A-Za-z_]+$
+    ConstraintDescription: 'Required. Can be characters and underscore only. No numbers or special characters allowed.'
+  TokenTableName:
+    Type: String
+    Default: 'sample_token'
+    Description: (Required) The name of the new DynamoDB to store connection identifiers for each connected clients. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+    AllowedPattern: ^[A-Za-z_]+$
+    ConstraintDescription: 'Required. Can be characters and underscore only. No numbers or special characters allowed.'
+  FrontPageApiStageName:
+    Type: String
+    Default: 'ProdStage'
+
+Resources:
+  FrontPageApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: ServerlessMessageBoardApi
+      EndpointConfiguration: REGIONAL
+      StageName: !Ref FrontPageApiStageName
+  FrontPageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ServerlessMessageBoardFrontFunction
+      CodeUri: bin/
+      Handler: main
+      MemorySize: 256
+      Runtime: go1.x
+      Description: 'Test Front Function'
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref RoomTableName
+      - DynamoDBCrudPolicy:
+          TableName: !Ref MessageTableName
+      - DynamoDBCrudPolicy:
+          TableName: !Ref TokenTableName
+      Environment:
+        Variables:
+          ROOM_TABLE_NAME: !Ref RoomTableName
+          MESSAGE_TABLE_NAME: !Ref MessageTableName
+          TOKEN_TABLE_NAME: !Ref TokenTableName
+          REGION: !Ref 'AWS::Region'
+          THRESHOLD: 10
+          API_PATH: !Join [ '', [ '/', !Ref FrontPageApiStageName, '/api'] ]
+      Events:
+        FrontPageApi:
+          Type: Api
+          Properties:
+            Path: '/'
+            Method: get
+            RestApiId: !Ref FrontPageApi
+  MessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ServerlessMessageBoardApiFunction
+      CodeUri: api/bin/
+      Handler: main
+      MemorySize: 256
+      Runtime: go1.x
+      Description: 'Test Message Function'
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref RoomTableName
+      - DynamoDBCrudPolicy:
+          TableName: !Ref MessageTableName
+      - DynamoDBCrudPolicy:
+          TableName: !Ref TokenTableName
+      Environment:
+        Variables:
+          ROOM_TABLE_NAME: !Ref RoomTableName
+          MESSAGE_TABLE_NAME: !Ref MessageTableName
+          TOKEN_TABLE_NAME: !Ref TokenTableName
+          REGION: !Ref 'AWS::Region'
+      Events:
+        FrontPageApi:
+          Type: Api
+          Properties:
+            Path: '/api'
+            Method: post
+            RestApiId: !Ref FrontPageApi
+  RoomTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: "room_id"
+        AttributeType: "N"
+      KeySchema:
+      - AttributeName: "room_id"
+        KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+      SSESpecification:
+        SSEEnabled: False
+      TableName: !Ref RoomTableName
+  MessageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: "message_id"
+        AttributeType: "N"
+      KeySchema:
+      - AttributeName: "message_id"
+        KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+      SSESpecification:
+        SSEEnabled: False
+      TableName: !Ref MessageTableName
+  TokenTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: "token"
+        AttributeType: "S"
+      KeySchema:
+      - AttributeName: "token"
+        KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+      SSESpecification:
+        SSEEnabled: False
+      TableName: !Ref TokenTableName
+
+Outputs:
+  APIURI:
+    Description: "URI"
+    Value: !Join [ '', [ 'https://', !Ref FrontPageApi, '.execute-api.',!Ref 'AWS::Region','.amazonaws.com/',!Ref FrontPageApiStageName,'/'] ]

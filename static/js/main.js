@@ -1,46 +1,16 @@
-$(document).ready(function() {
-  var
-    $headers     = $('body > div > h1'),
-    $header      = $headers.first(),
-    ignoreScroll = false,
-    timer;
-
-  $(window)
-    .on('resize', function() {
-      clearTimeout(timer);
-      $headers.visibility('disable callbacks');
-
-      $(document).scrollTop( $header.offset().top );
-
-      timer = setTimeout(function() {
-        $headers.visibility('enable callbacks');
-      }, 500);
-    });
-  $headers
-    .visibility({
-      once: false,
-      checkOnRefresh: true,
-      onTopPassed: function() {
-        $header = $(this);
-      },
-      onTopPassedReverse: function() {
-        $header = $(this);
-      }
-    });
-});
-function CreateRoom(url) {
+function CreateRoom() {
   $('.fullscreen.modal').modal('show');
   if (App.token.length <= 0) {
-    GetToken(url);
+    GetToken();
   } else {
     SetFormValueToken(App.token);
   }
 }
-function AddMessage(url) {
+function AddMessage() {
   $('.fullscreen.modal').modal('show');
   $('.ui.radio.checkbox').checkbox();
   if (App.token.length <= 0) {
-    GetToken(url);
+    GetToken();
   } else {
     SetFormValueToken(App.token);
   }
@@ -55,13 +25,13 @@ function ChangeIcon(icon_id) {
     $('#iconimg').attr('src', '{{template "icon2.jpg" .}}');
   }
 }
-function SubmitForm(elm, url) {
+function SubmitForm(elm) {
   $(elm).addClass("disabled");
   var data = $(elm).closest('form').serializeArray();
   data = parseJson(data);
   $.ajax({
     type:          'POST',
-    url:           url,
+    url:           App.url,
     dataType:      'json',
     contentType:   'application/json',
     scriptCharset: 'utf-8',
@@ -71,7 +41,7 @@ function SubmitForm(elm, url) {
     window.setTimeout(() => location.reload(true), 1000);
   });
 }
-function Report(elm, url) {
+function Report(elm) {
   if ($(elm).children('a').text() == 'Reported') {
     return;
   }
@@ -80,7 +50,7 @@ function Report(elm, url) {
   data = parseJson(data);
   $.ajax({
     type:          'POST',
-    url:           url,
+    url:           App.url,
     dataType:      'json',
     contentType:   'application/json',
     scriptCharset: 'utf-8',
@@ -90,7 +60,7 @@ function Report(elm, url) {
     $(elm).children('a').text('Reported');
   });
 }
-function GetToken(url) {
+function GetToken() {
   const data = {action: 'puttoken'};
   $.ajax({
     type:          'POST',
@@ -98,7 +68,7 @@ function GetToken(url) {
     contentType:   'application/json',
     scriptCharset: 'utf-8',
     data:          JSON.stringify(data),
-    url:           url
+    url:           App.url
   })
   .done(function(res) {
     App.token = res.token;
@@ -118,4 +88,4 @@ var parseJson = function(data) {
   }
   return res;
 };
-var App = { token: '' };
+var App = { token: '', url: location.origin + {{ .ApiPath }} };

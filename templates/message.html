@@ -1,5 +1,4 @@
 {{define "contents"}}
-{{ $apiurl := .Api }}
 {{ $messagelength := len .MessageList }}
   {{ if gt $messagelength 0 }}
     <div class="ui comments">
@@ -27,7 +26,7 @@
               <input type="hidden" name="message_id" value="{{ .Message_Id }}">
               {{ if lt .Status 10 }}
               <input type="hidden" name="status" value="1">
-	      <div onclick="Report(this, {{ $apiurl }});"><a class="reply">Report</a></div>
+	      <div onclick="Report(this);"><a class="reply">Report</a></div>
               {{ end }}
             </form>
           </div>
@@ -36,7 +35,7 @@
       {{ end }}
     </div>
   {{ end }}
-    <div class="ui primary button" onclick="AddMessage({{ $apiurl }});">
+    <div class="ui primary button" onclick="AddMessage();">
       Add Message
     </div>
     <div class="ui dimmer modals page transition hidden">
@@ -85,7 +84,7 @@
           <input id="token" type="hidden" name="token" value="">
           <div class="actions">
             <div class="ui button" onclick="CloseModal();">Cancel</div>
-            <div class="ui green button" onclick="SubmitForm(this, {{ $apiurl }});">Add</div>
+            <div class="ui green button" onclick="SubmitForm(this);">Add</div>
           </div>
         </form>
       </div>

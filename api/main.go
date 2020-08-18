@@ -1,11 +1,11 @@
 package main
 
 import (
+	"os"
 	"log"
 	"time"
 	"context"
 	"strconv"
-	"io/ioutil"
 	"encoding/json"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/aws/aws-sdk-go/aws"
@@ -46,12 +46,6 @@ type TokenResponse struct {
 	Token     string `json:"token"`
 }
 
-type ConstantData struct {
-	RoomTableName    string `json:"roomTableName"`
-	MessageTableName string `json:"messageTableName"`
-	TokenTableName   string `json:"tokenTableName"`
-}
-
 type Response events.APIGatewayProxyResponse
 
 const layout string = "2006-01-02 15:04"
@@ -61,9 +55,6 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	var room_id int
 	var message_id int
 	var err error
-	jsonString, _ := ioutil.ReadFile("constant/constant.json")
-	constant := new(ConstantData)
-	json.Unmarshal(jsonString, constant)
 	d := make(map[string]string)
 	json.Unmarshal([]byte(request.Body), &d)
 	if v, ok := d["action"]; ok {
@@ -72,9 +63,9 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			log.Print("Create Room.")
 			if _, ok := d["subject"]; ok {
 				if v, ok := d["token"]; ok {
-					if checkToken(constant.TokenTableName, v) {
-						err = putRoom(constant.RoomTableName, d["subject"])
-						deleteToken(constant.TokenTableName, v)
+					if checkToken(os.Getenv("TOKEN_TABLE_NAME"), v) {
+						err = putRoom(os.Getenv("ROOM_TABLE_NAME"), d["subject"])
+						deleteToken(os.Getenv("TOKEN_TABLE_NAME"), v)
 					}
 				}
 			}
@@ -84,9 +75,9 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			icon_id, _ := strconv.Atoi(d["icon"])
 			if err == nil {
 				if v, ok := d["token"]; ok {
-					if checkToken(constant.TokenTableName, v) {
-						err = putMessage(constant.MessageTableName, constant.RoomTableName, room_id, d["user"], d["message"], icon_id)
-						deleteToken(constant.TokenTableName, v)
+					if checkToken(os.Getenv("TOKEN_TABLE_NAME"), v) {
+						err = putMessage(os.Getenv("MESSAGE_TABLE_NAME"), os.Getenv("ROOM_TABLE_NAME"), room_id, d["user"], d["message"], icon_id)
+						deleteToken(os.Getenv("TOKEN_TABLE_NAME"), v)
 					}
 				}
 			}
@@ -95,13 +86,13 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			if _, ok := d["message_id"]; ok {
 				message_id, err = strconv.Atoi(d["message_id"])
 				if err == nil {
-					err = updateMessage(constant.MessageTableName, message_id, 1, "status")
+					err = updateMessage(os.Getenv("MESSAGE_TABLE_NAME"), message_id, 1, "status")
 				}
 			}
 		case "puttoken" :
 			hash, err := bcrypt.GenerateFromPassword([]byte("salt1"), bcrypt.DefaultCost)
 			if err == nil {
-				err = putToken(constant.TokenTableName, string(hash))
+				err = putToken(os.Getenv("TOKEN_TABLE_NAME"), string(hash))
 				if err == nil {
 					jsonBytes, err = json.Marshal(TokenResponse{Token:string(hash)})
 				}

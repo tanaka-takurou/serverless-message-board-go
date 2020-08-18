@@ -25,7 +25,7 @@
       {{ end }}
     </div>
   {{ end }}
-    <div class="ui primary button" onclick="CreateRoom({{ .Api }});">
+    <div class="ui primary button" onclick="CreateRoom();">
       Create Room
     </div>
     <div class="ui dimmer modals page transition hidden">
@@ -49,7 +49,7 @@
           <input id="token" type="hidden" name="token" value="">
           <div class="actions">
             <div class="ui button" onclick="CloseModal();">Cancel</div>
-            <div class="ui green button" onclick="SubmitForm(this, {{ .Api }});">Add</div>
+            <div class="ui green button" onclick="SubmitForm(this);">Add</div>
           </div>
         </form>
       </div>
