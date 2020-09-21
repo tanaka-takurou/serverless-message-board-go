@@ -8,13 +8,14 @@ import (
 	"strconv"
 	"encoding/json"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/dynamodbattribute"
 )
 
 type RoomData struct {
@@ -48,6 +49,9 @@ type TokenResponse struct {
 
 type Response events.APIGatewayProxyResponse
 
+var cfg aws.Config
+var dynamodbClient *dynamodb.Client
+
 const layout string = "2006-01-02 15:04"
 
 func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (Response, error) {
@@ -63,9 +67,9 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			log.Print("Create Room.")
 			if _, ok := d["subject"]; ok {
 				if v, ok := d["token"]; ok {
-					if checkToken(os.Getenv("TOKEN_TABLE_NAME"), v) {
-						err = putRoom(os.Getenv("ROOM_TABLE_NAME"), d["subject"])
-						deleteToken(os.Getenv("TOKEN_TABLE_NAME"), v)
+					if checkToken(ctx, os.Getenv("TOKEN_TABLE_NAME"), v) {
+						err = putRoom(ctx, os.Getenv("ROOM_TABLE_NAME"), d["subject"])
+						deleteToken(ctx, os.Getenv("TOKEN_TABLE_NAME"), v)
 					}
 				}
 			}
@@ -75,9 +79,9 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			icon_id, _ := strconv.Atoi(d["icon"])
 			if err == nil {
 				if v, ok := d["token"]; ok {
-					if checkToken(os.Getenv("TOKEN_TABLE_NAME"), v) {
-						err = putMessage(os.Getenv("MESSAGE_TABLE_NAME"), os.Getenv("ROOM_TABLE_NAME"), room_id, d["user"], d["message"], icon_id)
-						deleteToken(os.Getenv("TOKEN_TABLE_NAME"), v)
+					if checkToken(ctx, os.Getenv("TOKEN_TABLE_NAME"), v) {
+						err = putMessage(ctx, os.Getenv("MESSAGE_TABLE_NAME"), os.Getenv("ROOM_TABLE_NAME"), room_id, d["user"], d["message"], icon_id)
+						deleteToken(ctx, os.Getenv("TOKEN_TABLE_NAME"), v)
 					}
 				}
 			}
@@ -86,13 +90,13 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			if _, ok := d["message_id"]; ok {
 				message_id, err = strconv.Atoi(d["message_id"])
 				if err == nil {
-					err = updateMessage(os.Getenv("MESSAGE_TABLE_NAME"), message_id, 1, "status")
+					err = updateMessage(ctx, os.Getenv("MESSAGE_TABLE_NAME"), message_id, 1, "status")
 				}
 			}
 		case "puttoken" :
 			hash, err := bcrypt.GenerateFromPassword([]byte("salt1"), bcrypt.DefaultCost)
 			if err == nil {
-				err = putToken(os.Getenv("TOKEN_TABLE_NAME"), string(hash))
+				err = putToken(ctx, os.Getenv("TOKEN_TABLE_NAME"), string(hash))
 				if err == nil {
 					jsonBytes, err = json.Marshal(TokenResponse{Token:string(hash)})
 				}
@@ -112,39 +116,40 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	}, nil
 }
 
-func scan(tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	expr, err := expression.NewBuilder().WithFilter(filt).Build()
 	if err != nil {
 		return nil, err
 	}
-	params := &dynamodb.ScanInput{
+	input := &dynamodb.ScanInput{
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		FilterExpression:          expr.Filter(),
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(tableName),
 	}
-	return svc.Scan(params)
+	req := dynamodbClient.ScanRequest(input)
+	res, err := req.Send(ctx)
+	return res.ScanOutput, err
 }
 
-func put(tableName string, av map[string]*dynamodb.AttributeValue) error {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func put(ctx context.Context, tableName string, av map[string]dynamodb.AttributeValue) error {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	input := &dynamodb.PutItemInput{
 		Item:      av,
 		TableName: aws.String(tableName),
 	}
-	_, err := svc.PutItem(input)
+	req := dynamodbClient.PutItemRequest(input)
+	_, err := req.Send(ctx)
 	return err
 }
 
-func putToken(tokenTableName string, token string) error {
+func putToken(ctx context.Context, tokenTableName string, token string) error {
 	t := time.Now()
 	item := TokenData {
 		Token: token,
@@ -154,56 +159,58 @@ func putToken(tokenTableName string, token string) error {
 	if err != nil {
 		return err
 	}
-	err = put(tokenTableName, av)
+	err = put(ctx, tokenTableName, av)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func get(tableName string, key map[string]*dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func get(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
-		AttributesToGet: []*string{
-			aws.String(att),
-		},
+		AttributesToGet: []string{att},
 		ConsistentRead: aws.Bool(true),
-		ReturnConsumedCapacity: aws.String("NONE"),
+		ReturnConsumedCapacity: dynamodb.ReturnConsumedCapacityNone,
 	}
-	return svc.GetItem(input)
+	req := dynamodbClient.GetItemRequest(input)
+	res, err := req.Send(ctx)
+	return res.GetItemOutput, err
 }
 
-func update(tableName string, an map[string]*string, av map[string]*dynamodb.AttributeValue, key map[string]*dynamodb.AttributeValue, updateExpression string) error {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func update(ctx context.Context, tableName string, an map[string]string, av map[string]dynamodb.AttributeValue, key map[string]dynamodb.AttributeValue, updateExpression string) error {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	input := &dynamodb.UpdateItemInput{
 		ExpressionAttributeNames: an,
 		ExpressionAttributeValues: av,
 		TableName: aws.String(tableName),
 		Key: key,
-		ReturnValues:     aws.String("UPDATED_NEW"),
+		ReturnValues:     dynamodb.ReturnValueUpdatedNew,
 		UpdateExpression: aws.String(updateExpression),
 	}
 
-	_, err := svc.UpdateItem(input)
+	req := dynamodbClient.UpdateItemRequest(input)
+	_, err := req.Send(ctx)
 	return err
 }
 
-func updateRoom(roomTableName string, room_id int, user string, message string, updated string) error {
-	an := map[string]*string{
-		"#u": aws.String("last_user"),
-		"#m": aws.String("last_message"),
-		"#d": aws.String("updated"),
-		"#c": aws.String("messages"),
+func updateRoom(ctx context.Context, roomTableName string, room_id int, user string, message string, updated string) error {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
 	}
-	av := map[string]*dynamodb.AttributeValue{
+	an := map[string]string{
+		"#u": "last_user",
+		"#m": "last_message",
+		"#d": "updated",
+		"#c": "messages",
+	}
+	av := map[string]dynamodb.AttributeValue{
 		":u": {
 			S: aws.String(user),
 		},
@@ -217,52 +224,46 @@ func updateRoom(roomTableName string, room_id int, user string, message string, 
 			N: aws.String("1"),
 		},
 	}
-	key := map[string]*dynamodb.AttributeValue{
+	key := map[string]dynamodb.AttributeValue{
 		"room_id": {
 			N: aws.String(strconv.Itoa(room_id)),
 		},
 	}
 	updateExpression := "set #u = :u, #m = :m, #d = :d, #c = #c + :c"
 
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
 	input := &dynamodb.UpdateItemInput{
 		ExpressionAttributeNames: an,
 		ExpressionAttributeValues: av,
 		TableName: aws.String(roomTableName),
 		Key: key,
-		ReturnValues:     aws.String("UPDATED_NEW"),
+		ReturnValues:     dynamodb.ReturnValueUpdatedNew,
 		UpdateExpression: aws.String(updateExpression),
 	}
 
-	_, err := svc.UpdateItem(input)
-	if err != nil {
-		return err
-	}
-	return nil
+	req := dynamodbClient.UpdateItemRequest(input)
+	_, err := req.Send(ctx)
+	return err
 }
 
-func getMessageCount(messageTableName string, room_id int)(*int64, error)  {
-	result, err := scan(messageTableName, expression.Name("room_id").Equal(expression.Value(room_id)))
+func getMessageCount(ctx context.Context, messageTableName string, room_id int)(*int64, error)  {
+	result, err := scan(ctx, messageTableName, expression.Name("room_id").Equal(expression.Value(room_id)))
 	if err != nil {
 		return nil, err
 	}
 	return result.ScannedCount, nil
 }
 
-func getRoomCount(roomTableName string)(*int64, error)  {
-	result, err := scan(roomTableName, expression.NotEqual(expression.Name("status"), expression.Value(-1)))
+func getRoomCount(ctx context.Context, roomTableName string)(*int64, error)  {
+	result, err := scan(ctx, roomTableName, expression.NotEqual(expression.Name("status"), expression.Value(-1)))
 	if err != nil {
 		return nil, err
 	}
 	return result.ScannedCount, nil
 }
 
-func putMessage(messageTableName string, roomTableName string, room_id int, user string, message string, icon_id int) error {
+func putMessage(ctx context.Context, messageTableName string, roomTableName string, room_id int, user string, message string, icon_id int) error {
 	t := time.Now()
-	count, err := getMessageCount(messageTableName, room_id)
+	count, err := getMessageCount(ctx, messageTableName, room_id)
 	if err != nil {
 		return err
 	}
@@ -279,17 +280,17 @@ func putMessage(messageTableName string, roomTableName string, room_id int, user
 	if err != nil {
 		return err
 	}
-	err = put(messageTableName, av)
+	err = put(ctx, messageTableName, av)
 	if err != nil {
 		return err
 	}
-	_ = updateRoom(roomTableName, room_id, user, message, t.Format(layout))
+	_ = updateRoom(ctx, roomTableName, room_id, user, message, t.Format(layout))
 	return nil
 }
 
-func putRoom(roomTableName string, subject string) error {
+func putRoom(ctx context.Context, roomTableName string, subject string) error {
 	t := time.Now()
-	count, err := getRoomCount(roomTableName)
+	count, err := getRoomCount(ctx, roomTableName)
 	if err != nil {
 		return err
 	}
@@ -306,73 +307,82 @@ func putRoom(roomTableName string, subject string) error {
 	if err != nil {
 		return err
 	}
-	err = put(roomTableName, av)
+	err = put(ctx, roomTableName, av)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func updateMessage(messageTableName string, message_id int, value int, name string) error {
-	an := map[string]*string{
-		"#s": aws.String(name),
+func updateMessage(ctx context.Context, messageTableName string, message_id int, value int, name string) error {
+	an := map[string]string{
+		"#s": name,
 	}
-	av := map[string]*dynamodb.AttributeValue{
+	av := map[string]dynamodb.AttributeValue{
 		":new": {
 			N: aws.String(strconv.Itoa(value)),
 		},
 	}
-	key := map[string]*dynamodb.AttributeValue{
+	key := map[string]dynamodb.AttributeValue{
 		"message_id": {
 			N: aws.String(strconv.Itoa(message_id)),
 		},
 	}
 	updateExpression := "set #s = #s + :new"
-	err := update(messageTableName, an, av, key, updateExpression)
+	err := update(ctx, messageTableName, an, av, key, updateExpression)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func checkToken(tokenTableName string, token string) bool {
+func checkToken(ctx context.Context, tokenTableName string, token string) bool {
 	item := struct {Token string `json:"token"`}{token}
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
 		return false
 	}
-	res, err := get(tokenTableName, av, "token")
+	res, err := get(ctx, tokenTableName, av, "token")
 	if err == nil && res.Item != nil{
 		return true
 	}
 	return false
 }
 
-func delete(tableName string, key map[string]*dynamodb.AttributeValue) error {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func delete(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue) error {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	input := &dynamodb.DeleteItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
 	}
 
-	_, err := svc.DeleteItem(input)
+	req := dynamodbClient.DeleteItemRequest(input)
+	_, err := req.Send(ctx)
 	return err
 }
 
-func deleteToken(tokenTableName string, token string) error {
-	key := map[string]*dynamodb.AttributeValue{
+func deleteToken(ctx context.Context, tokenTableName string, token string) error {
+	key := map[string]dynamodb.AttributeValue{
 		"token": {
 			S: aws.String(token),
 		},
 	}
-	err := delete(tokenTableName, key)
+	err := delete(ctx, tokenTableName, key)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func init() {
+	var err error
+	cfg, err = external.LoadDefaultAWSConfig()
+	cfg.Region = os.Getenv("REGION")
+	if err != nil {
+		log.Print(err)
+	}
 }
 
 func main() {
