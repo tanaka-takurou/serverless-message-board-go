@@ -9,13 +9,14 @@ import (
 	"context"
 	"strconv"
 	"html/template"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/dynamodbattribute"
 )
 
 type PageData struct {
@@ -49,20 +50,10 @@ type MessageData struct {
 	Created    string `json:"created"`
 }
 
-type TokenData struct {
-	Token     string `json:"token"`
-	Created   string `json:"created"`
-}
-
-type ConstantData struct {
-	Api              string `json:"api"`
-	Title            string `json:"title"`
-	Threshold        int    `json:"threshold"`
-	RoomTableName    string `json:"roomTableName"`
-	MessageTableName string `json:"messageTableName"`
-}
-
 type Response events.APIGatewayProxyResponse
+
+var cfg aws.Config
+var dynamodbClient *dynamodb.Client
 
 const layout string = "2006-01-02 15:04"
 const title  string = "Sample Message Room"
@@ -91,12 +82,12 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	if len(s_room_id) > 0 {
 		room_id, err = strconv.Atoi(s_room_id)
 		if err == nil {
-			dat.Title = getRoomSubject(os.Getenv("ROOM_TABLE_NAME"), room_id)
+			dat.Title = getRoomSubject(ctx, os.Getenv("ROOM_TABLE_NAME"), room_id)
 			dat.RoomId = room_id
 			dat.MessagePage = 1
 			dat.RoomPage = 0
 			threshold, _ := strconv.Atoi(os.Getenv("THRESHOLD"))
-			dat.MessageList, err = getMessageList(os.Getenv("MESSAGE_TABLE_NAME"), room_id, threshold)
+			dat.MessageList, err = getMessageList(ctx, os.Getenv("MESSAGE_TABLE_NAME"), room_id, threshold)
 			dat.RoomList = []RoomData{}
 			sort.Slice(dat.MessageList, func(i, j int) bool { return dat.MessageList[i].Created < dat.MessageList[j].Created })
 		}
@@ -107,7 +98,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		dat.MessagePage = 0
 		dat.RoomPage = 1
 		dat.MessageList = []MessageData{}
-		dat.RoomList, err = getRoomList(os.Getenv("ROOM_TABLE_NAME"))
+		dat.RoomList, err = getRoomList(ctx, os.Getenv("ROOM_TABLE_NAME"))
 		sort.Slice(dat.RoomList, func(i, j int) bool { return dat.RoomList[i].Updated > dat.RoomList[j].Updated })
 		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/room.html"))
 	}
@@ -117,8 +108,6 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	}
 	if e := templates.ExecuteTemplate(fw, "base", dat); e != nil {
 		log.Fatal(e)
-	} else {
-		log.Print(request.RequestContext.Identity.SourceIP)
 	}
 	res := Response{
 		StatusCode:      200,
@@ -131,45 +120,45 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	return res, nil
 }
 
-func get(tableName string, key map[string]*dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func get(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
-		AttributesToGet: []*string{
-			aws.String(att),
-		},
+		AttributesToGet: []string{att},
 		ConsistentRead: aws.Bool(true),
-		ReturnConsumedCapacity: aws.String("NONE"),
+		ReturnConsumedCapacity: dynamodb.ReturnConsumedCapacityNone,
 	}
-	return svc.GetItem(input)
+	req := dynamodbClient.GetItemRequest(input)
+	res, err := req.Send(ctx)
+	return res.GetItemOutput, err
 }
 
-func scan(tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-	}))
-	svc := dynamodb.New(sess)
+func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
+	if dynamodbClient == nil {
+		dynamodbClient = dynamodb.New(cfg)
+	}
 	expr, err := expression.NewBuilder().WithFilter(filt).Build()
 	if err != nil {
 		return nil, err
 	}
-	params := &dynamodb.ScanInput{
+	input := &dynamodb.ScanInput{
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		FilterExpression:          expr.Filter(),
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(tableName),
 	}
-	return svc.Scan(params)
+	req := dynamodbClient.ScanRequest(input)
+	res, err := req.Send(ctx)
+	return res.ScanOutput, err
 }
 
-func getMessageList(tableName string, room_id int, threshold int)([]MessageData, error)  {
+func getMessageList(ctx context.Context, tableName string, room_id int, threshold int)([]MessageData, error)  {
 	var messageList []MessageData
-	result, err := scan(tableName, expression.Name("room_id").Equal(expression.Value(room_id)))
+	result, err := scan(ctx, tableName, expression.Name("room_id").Equal(expression.Value(room_id)))
 	if err != nil {
 		return nil, err
 	}
@@ -187,9 +176,9 @@ func getMessageList(tableName string, room_id int, threshold int)([]MessageData,
 	return messageList, nil
 }
 
-func getRoomList(tableName string)([]RoomData, error)  {
+func getRoomList(ctx context.Context, tableName string)([]RoomData, error)  {
 	var roomList []RoomData
-	result, err := scan(tableName, expression.Equal(expression.Name("status"), expression.Value(0)))
+	result, err := scan(ctx, tableName, expression.Equal(expression.Name("status"), expression.Value(0)))
 	if err != nil {
 		return nil, err
 	}
@@ -204,13 +193,13 @@ func getRoomList(tableName string)([]RoomData, error)  {
 	return roomList, nil
 }
 
-func getRoomSubject(tableName string, roomId int) string {
+func getRoomSubject(ctx context.Context, tableName string, roomId int) string {
 	item := struct {Room_Id int `json:"room_id"`}{roomId}
 	av, err := dynamodbattribute.MarshalMap(item)
 	if err != nil {
 		return ""
 	}
-	res, err := get(tableName, av, "subject")
+	res, err := get(ctx, tableName, av, "subject")
 	if err == nil && res.Item != nil{
 		result := struct {Subject string `json:"subject"`}{""}
 		err = dynamodbattribute.UnmarshalMap(res.Item, &result)
@@ -220,6 +209,15 @@ func getRoomSubject(tableName string, roomId int) string {
 		return result.Subject
 	}
 	return ""
+}
+
+func init() {
+	var err error
+	cfg, err = external.LoadDefaultAWSConfig()
+	cfg.Region = os.Getenv("REGION")
+	if err != nil {
+		log.Print(err)
+	}
 }
 
 func main() {
