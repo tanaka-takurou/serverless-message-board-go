@@ -136,11 +136,11 @@ func get(ctx context.Context, tableName string, key map[string]dynamodb.Attribut
 	return res.GetItemOutput, err
 }
 
-func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
+func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder, proj expression.ProjectionBuilder)(*dynamodb.ScanOutput, error)  {
 	if dynamodbClient == nil {
 		dynamodbClient = dynamodb.New(cfg)
 	}
-	expr, err := expression.NewBuilder().WithFilter(filt).Build()
+	expr, err := expression.NewBuilder().WithFilter(filt).WithProjection(proj).Build()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,9 @@ func scan(ctx context.Context, tableName string, filt expression.ConditionBuilde
 
 func getMessageList(ctx context.Context, tableName string, room_id int, threshold int)([]MessageData, error)  {
 	var messageList []MessageData
-	result, err := scan(ctx, tableName, expression.Name("room_id").Equal(expression.Value(room_id)))
+	filt := expression.Equal(expression.Name("room_id"), expression.Value(room_id))
+	proj := expression.NamesList(expression.Name("message_id"), expression.Name("room_id"), expression.Name("icon_id"), expression.Name("status"), expression.Name("user"), expression.Name("message"), expression.Name("created"))
+	result, err := scan(ctx, tableName, filt, proj)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +180,9 @@ func getMessageList(ctx context.Context, tableName string, room_id int, threshol
 
 func getRoomList(ctx context.Context, tableName string)([]RoomData, error)  {
 	var roomList []RoomData
-	result, err := scan(ctx, tableName, expression.Equal(expression.Name("status"), expression.Value(0)))
+	filt := expression.Equal(expression.Name("status"), expression.Value(0))
+	proj := expression.NamesList(expression.Name("room_id"), expression.Name("status"), expression.Name("messages"), expression.Name("subject"), expression.Name("last_message"), expression.Name("last_user"), expression.Name("updated"))
+	result, err := scan(ctx, tableName, filt, proj)
 	if err != nil {
 		return nil, err
 	}
