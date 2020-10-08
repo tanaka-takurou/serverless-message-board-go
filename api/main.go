@@ -116,11 +116,11 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	}, nil
 }
 
-func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder)(*dynamodb.ScanOutput, error)  {
+func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder, proj expression.ProjectionBuilder)(*dynamodb.ScanOutput, error)  {
 	if dynamodbClient == nil {
 		dynamodbClient = dynamodb.New(cfg)
 	}
-	expr, err := expression.NewBuilder().WithFilter(filt).Build()
+	expr, err := expression.NewBuilder().WithFilter(filt).WithProjection(proj).Build()
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,9 @@ func updateRoom(ctx context.Context, roomTableName string, room_id int, user str
 }
 
 func getMessageCount(ctx context.Context, messageTableName string, room_id int)(*int64, error)  {
-	result, err := scan(ctx, messageTableName, expression.Name("room_id").Equal(expression.Value(room_id)))
+	filt := expression.Equal(expression.Name("room_id"), expression.Value(room_id))
+	proj := expression.NamesList(expression.Name("message_id"), expression.Name("room_id"), expression.Name("icon_id"), expression.Name("status"), expression.Name("user"), expression.Name("message"), expression.Name("created"))
+	result, err := scan(ctx, messageTableName, filt, proj)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +256,9 @@ func getMessageCount(ctx context.Context, messageTableName string, room_id int)(
 }
 
 func getRoomCount(ctx context.Context, roomTableName string)(*int64, error)  {
-	result, err := scan(ctx, roomTableName, expression.NotEqual(expression.Name("status"), expression.Value(-1)))
+	filt := expression.NotEqual(expression.Name("status"), expression.Value(-1))
+	proj := expression.NamesList(expression.Name("room_id"), expression.Name("status"), expression.Name("messages"), expression.Name("subject"), expression.Name("last_message"), expression.Name("last_user"), expression.Name("updated"))
+	result, err := scan(ctx, roomTableName, filt, proj)
 	if err != nil {
 		return nil, err
 	}
