@@ -12,35 +12,43 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/expression"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 )
 
 type RoomData struct {
-	Room_Id      int    `json:"room_id"`
-	Status       int    `json:"status"`
-	Messages     int    `json:"messages"`
-	Subject      string `json:"subject"`
-	Last_Message string `json:"last_message"`
-	Last_User    string `json:"last_user"`
-	Updated      string `json:"updated"`
+	Room_Id      int    `dynamodbav:"room_id"`
+	Status       int    `dynamodbav:"status"`
+	Messages     int    `dynamodbav:"messages"`
+	Subject      string `dynamodbav:"subject"`
+	Last_Message string `dynamodbav:"last_message"`
+	Last_User    string `dynamodbav:"last_user"`
+	Updated      string `dynamodbav:"updated"`
 }
 
 type MessageData struct {
-	Message_Id int    `json:"message_id"`
-	Room_Id    int    `json:"room_id"`
-	Icon_Id    int    `json:"icon_id"`
-	Status     int    `json:"status"`
-	User       string `json:"user"`
-	Message    string `json:"message"`
-	Created    string `json:"created"`
+	Message_Id int    `dynamodbav:"message_id"`
+	Room_Id    int    `dynamodbav:"room_id"`
+	Icon_Id    int    `dynamodbav:"icon_id"`
+	Status     int    `dynamodbav:"status"`
+	User       string `dynamodbav:"user"`
+	Message    string `dynamodbav:"message"`
+	Created    string `dynamodbav:"created"`
+}
+
+type UpdateRoomData struct {
+	Last_User    string `dynamodbav:":u"`
+	Last_Message string `dynamodbav:":m"`
+	Messages     int    `dynamodbav:":c"`
+	Updated      string `dynamodbav:":d"`
 }
 
 type TokenData struct {
-	Token     string `json:"token"`
-	Created   string `json:"created"`
+	Token     string `dynamodbav:"token"`
+	Created   string `dynamodbav:"created"`
 }
 
 type TokenResponse struct {
@@ -49,7 +57,6 @@ type TokenResponse struct {
 
 type Response events.APIGatewayProxyResponse
 
-var cfg aws.Config
 var dynamodbClient *dynamodb.Client
 
 const layout string = "2006-01-02 15:04"
@@ -104,6 +111,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		}
 	}
 	if err != nil {
+		log.Print(err)
 		return Response{}, err
 	}
 	responseBody := ""
@@ -118,7 +126,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 
 func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder, proj expression.ProjectionBuilder)(*dynamodb.ScanOutput, error)  {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	expr, err := expression.NewBuilder().WithFilter(filt).WithProjection(proj).Build()
 	if err != nil {
@@ -131,21 +139,19 @@ func scan(ctx context.Context, tableName string, filt expression.ConditionBuilde
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(tableName),
 	}
-	req := dynamodbClient.ScanRequest(input)
-	res, err := req.Send(ctx)
-	return res.ScanOutput, err
+	res, err := dynamodbClient.Scan(ctx, input)
+	return res, err
 }
 
-func put(ctx context.Context, tableName string, av map[string]dynamodb.AttributeValue) error {
+func put(ctx context.Context, tableName string, av map[string]types.AttributeValue) error {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	input := &dynamodb.PutItemInput{
 		Item:      av,
 		TableName: aws.String(tableName),
 	}
-	req := dynamodbClient.PutItemRequest(input)
-	_, err := req.Send(ctx)
+	_, err := dynamodbClient.PutItem(ctx, input)
 	return err
 }
 
@@ -155,7 +161,7 @@ func putToken(ctx context.Context, tokenTableName string, token string) error {
 		Token: token,
 		Created: t.Format(layout),
 	}
-	av, err := dynamodbattribute.MarshalMap(item)
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return err
 	}
@@ -166,43 +172,41 @@ func putToken(ctx context.Context, tokenTableName string, token string) error {
 	return nil
 }
 
-func get(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
+func get(ctx context.Context, tableName string, key map[string]types.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
 		AttributesToGet: []string{att},
 		ConsistentRead: aws.Bool(true),
-		ReturnConsumedCapacity: dynamodb.ReturnConsumedCapacityNone,
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityNone,
 	}
-	req := dynamodbClient.GetItemRequest(input)
-	res, err := req.Send(ctx)
-	return res.GetItemOutput, err
+	res, err := dynamodbClient.GetItem(ctx, input)
+	return res, err
 }
 
-func update(ctx context.Context, tableName string, an map[string]string, av map[string]dynamodb.AttributeValue, key map[string]dynamodb.AttributeValue, updateExpression string) error {
+func update(ctx context.Context, tableName string, an map[string]string, av map[string]types.AttributeValue, key map[string]types.AttributeValue, updateExpression string) error {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	input := &dynamodb.UpdateItemInput{
 		ExpressionAttributeNames: an,
 		ExpressionAttributeValues: av,
 		TableName: aws.String(tableName),
 		Key: key,
-		ReturnValues:     dynamodb.ReturnValueUpdatedNew,
+		ReturnValues:     types.ReturnValueUpdatedNew,
 		UpdateExpression: aws.String(updateExpression),
 	}
 
-	req := dynamodbClient.UpdateItemRequest(input)
-	_, err := req.Send(ctx)
+	_, err := dynamodbClient.UpdateItem(ctx, input)
 	return err
 }
 
 func updateRoom(ctx context.Context, roomTableName string, room_id int, user string, message string, updated string) error {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	an := map[string]string{
 		"#u": "last_user",
@@ -210,24 +214,22 @@ func updateRoom(ctx context.Context, roomTableName string, room_id int, user str
 		"#d": "updated",
 		"#c": "messages",
 	}
-	av := map[string]dynamodb.AttributeValue{
-		":u": {
-			S: aws.String(user),
-		},
-		":m": {
-			S: aws.String(message),
-		},
-		":d": {
-			S: aws.String(updated),
-		},
-		":c": {
-			N: aws.String("1"),
-		},
+
+	av_struct := UpdateRoomData{
+		Last_User:    user,
+		Last_Message: message,
+		Messages:     1,
+		Updated:      updated,
 	}
-	key := map[string]dynamodb.AttributeValue{
-		"room_id": {
-			N: aws.String(strconv.Itoa(room_id)),
-		},
+	av, err := attributevalue.MarshalMap(av_struct)
+	if err != nil {
+		return err
+	}
+
+	key_struct := struct {Room int `dynamodbav:"room_id"`}{room_id}
+	key, err := attributevalue.MarshalMap(key_struct)
+	if err != nil {
+		return err
 	}
 	updateExpression := "set #u = :u, #m = :m, #d = :d, #c = #c + :c"
 
@@ -236,31 +238,30 @@ func updateRoom(ctx context.Context, roomTableName string, room_id int, user str
 		ExpressionAttributeValues: av,
 		TableName: aws.String(roomTableName),
 		Key: key,
-		ReturnValues:     dynamodb.ReturnValueUpdatedNew,
+		ReturnValues:     types.ReturnValueUpdatedNew,
 		UpdateExpression: aws.String(updateExpression),
 	}
 
-	req := dynamodbClient.UpdateItemRequest(input)
-	_, err := req.Send(ctx)
+	_, err = dynamodbClient.UpdateItem(ctx, input)
 	return err
 }
 
-func getMessageCount(ctx context.Context, messageTableName string, room_id int)(*int64, error)  {
+func getMessageCount(ctx context.Context, messageTableName string, room_id int)(int32, error)  {
 	filt := expression.Equal(expression.Name("room_id"), expression.Value(room_id))
 	proj := expression.NamesList(expression.Name("message_id"), expression.Name("room_id"), expression.Name("icon_id"), expression.Name("status"), expression.Name("user"), expression.Name("message"), expression.Name("created"))
 	result, err := scan(ctx, messageTableName, filt, proj)
 	if err != nil {
-		return nil, err
+		return int32(0), err
 	}
 	return result.ScannedCount, nil
 }
 
-func getRoomCount(ctx context.Context, roomTableName string)(*int64, error)  {
+func getRoomCount(ctx context.Context, roomTableName string)(int32, error)  {
 	filt := expression.NotEqual(expression.Name("status"), expression.Value(-1))
 	proj := expression.NamesList(expression.Name("room_id"), expression.Name("status"), expression.Name("messages"), expression.Name("subject"), expression.Name("last_message"), expression.Name("last_user"), expression.Name("updated"))
 	result, err := scan(ctx, roomTableName, filt, proj)
 	if err != nil {
-		return nil, err
+		return int32(0), err
 	}
 	return result.ScannedCount, nil
 }
@@ -272,7 +273,7 @@ func putMessage(ctx context.Context, messageTableName string, roomTableName stri
 		return err
 	}
 	item := MessageData {
-		Message_Id: int(*count) + 1,
+		Message_Id: int(count) + 1,
 		Room_Id: room_id,
 		Icon_Id: icon_id,
 		Status: 0,
@@ -280,7 +281,7 @@ func putMessage(ctx context.Context, messageTableName string, roomTableName stri
 		Message: message,
 		Created: t.Format(layout),
 	}
-	av, err := dynamodbattribute.MarshalMap(item)
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return err
 	}
@@ -299,7 +300,7 @@ func putRoom(ctx context.Context, roomTableName string, subject string) error {
 		return err
 	}
 	item := RoomData {
-		Room_Id: int(*count) + 1,
+		Room_Id: int(count) + 1,
 		Status: 0,
 		Messages: 0,
 		Subject: subject,
@@ -307,7 +308,7 @@ func putRoom(ctx context.Context, roomTableName string, subject string) error {
 		Last_User: "none",
 		Updated: t.Format(layout),
 	}
-	av, err := dynamodbattribute.MarshalMap(item)
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return err
 	}
@@ -322,18 +323,21 @@ func updateMessage(ctx context.Context, messageTableName string, message_id int,
 	an := map[string]string{
 		"#s": name,
 	}
-	av := map[string]dynamodb.AttributeValue{
-		":new": {
-			N: aws.String(strconv.Itoa(value)),
-		},
+
+	av_struct := struct {New int `dynamodbav:":new"`}{value}
+	av, err := attributevalue.MarshalMap(av_struct)
+	if err != nil {
+		return err
 	}
-	key := map[string]dynamodb.AttributeValue{
-		"message_id": {
-			N: aws.String(strconv.Itoa(message_id)),
-		},
+
+	key_struct := struct {Message int `dynamodbav:"message_id"`}{message_id}
+	key, err := attributevalue.MarshalMap(key_struct)
+	if err != nil {
+		return err
 	}
+
 	updateExpression := "set #s = #s + :new"
-	err := update(ctx, messageTableName, an, av, key, updateExpression)
+	err = update(ctx, messageTableName, an, av, key, updateExpression)
 	if err != nil {
 		return err
 	}
@@ -341,8 +345,8 @@ func updateMessage(ctx context.Context, messageTableName string, message_id int,
 }
 
 func checkToken(ctx context.Context, tokenTableName string, token string) bool {
-	item := struct {Token string `json:"token"`}{token}
-	av, err := dynamodbattribute.MarshalMap(item)
+	item := struct {Token string `dynamodbav:"token"`}{token}
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return false
 	}
@@ -353,40 +357,41 @@ func checkToken(ctx context.Context, tokenTableName string, token string) bool {
 	return false
 }
 
-func delete(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue) error {
+func delete(ctx context.Context, tableName string, key map[string]types.AttributeValue) error {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	input := &dynamodb.DeleteItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
 	}
 
-	req := dynamodbClient.DeleteItemRequest(input)
-	_, err := req.Send(ctx)
+	_, err := dynamodbClient.DeleteItem(ctx, input)
 	return err
 }
 
 func deleteToken(ctx context.Context, tokenTableName string, token string) error {
-	key := map[string]dynamodb.AttributeValue{
-		"token": {
-			S: aws.String(token),
-		},
-	}
-	err := delete(ctx, tokenTableName, key)
+	item := struct {Token string `dynamodbav:"token"`}{token}
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
+		log.Print(err)
+		return err
+	}
+	err = delete(ctx, tokenTableName, av)
+	if err != nil {
+		log.Print(err)
 		return err
 	}
 	return nil
 }
 
-func init() {
+func getConfig(ctx context.Context) aws.Config {
 	var err error
-	cfg, err = external.LoadDefaultAWSConfig()
-	cfg.Region = os.Getenv("REGION")
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(os.Getenv("REGION")))
 	if err != nil {
 		log.Print(err)
 	}
+	return cfg
 }
 
 func main() {

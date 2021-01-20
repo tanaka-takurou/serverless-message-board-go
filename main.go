@@ -13,10 +13,11 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/expression"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/dynamodbattribute"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 )
 
 type PageData struct {
@@ -52,7 +53,6 @@ type MessageData struct {
 
 type Response events.APIGatewayProxyResponse
 
-var cfg aws.Config
 var dynamodbClient *dynamodb.Client
 
 const layout string = "2006-01-02 15:04"
@@ -120,25 +120,24 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 	return res, nil
 }
 
-func get(ctx context.Context, tableName string, key map[string]dynamodb.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
+func get(ctx context.Context, tableName string, key map[string]types.AttributeValue, att string)(*dynamodb.GetItemOutput, error) {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(tableName),
 		Key: key,
 		AttributesToGet: []string{att},
 		ConsistentRead: aws.Bool(true),
-		ReturnConsumedCapacity: dynamodb.ReturnConsumedCapacityNone,
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityNone,
 	}
-	req := dynamodbClient.GetItemRequest(input)
-	res, err := req.Send(ctx)
-	return res.GetItemOutput, err
+	res, err := dynamodbClient.GetItem(ctx, input)
+	return res, err
 }
 
 func scan(ctx context.Context, tableName string, filt expression.ConditionBuilder, proj expression.ProjectionBuilder)(*dynamodb.ScanOutput, error)  {
 	if dynamodbClient == nil {
-		dynamodbClient = dynamodb.New(cfg)
+		dynamodbClient = dynamodb.NewFromConfig(getConfig(ctx))
 	}
 	expr, err := expression.NewBuilder().WithFilter(filt).WithProjection(proj).Build()
 	if err != nil {
@@ -151,9 +150,8 @@ func scan(ctx context.Context, tableName string, filt expression.ConditionBuilde
 		ProjectionExpression:      expr.Projection(),
 		TableName:                 aws.String(tableName),
 	}
-	req := dynamodbClient.ScanRequest(input)
-	res, err := req.Send(ctx)
-	return res.ScanOutput, err
+	res, err := dynamodbClient.Scan(ctx, input)
+	return res, err
 }
 
 func getMessageList(ctx context.Context, tableName string, room_id int, threshold int)([]MessageData, error)  {
@@ -166,7 +164,7 @@ func getMessageList(ctx context.Context, tableName string, room_id int, threshol
 	}
 	for _, i := range result.Items {
 		item := MessageData{}
-		err = dynamodbattribute.UnmarshalMap(i, &item)
+		err = attributevalue.UnmarshalMap(i, &item)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +186,7 @@ func getRoomList(ctx context.Context, tableName string)([]RoomData, error)  {
 	}
 	for _, i := range result.Items {
 		item := RoomData{}
-		err = dynamodbattribute.UnmarshalMap(i, &item)
+		err = attributevalue.UnmarshalMap(i, &item)
 		if err != nil {
 			return nil, err
 		}
@@ -199,14 +197,14 @@ func getRoomList(ctx context.Context, tableName string)([]RoomData, error)  {
 
 func getRoomSubject(ctx context.Context, tableName string, roomId int) string {
 	item := struct {Room_Id int `json:"room_id"`}{roomId}
-	av, err := dynamodbattribute.MarshalMap(item)
+	av, err := attributevalue.MarshalMap(item)
 	if err != nil {
 		return ""
 	}
 	res, err := get(ctx, tableName, av, "subject")
 	if err == nil && res.Item != nil{
 		result := struct {Subject string `json:"subject"`}{""}
-		err = dynamodbattribute.UnmarshalMap(res.Item, &result)
+		err = attributevalue.UnmarshalMap(res.Item, &result)
 		if err != nil {
 			return ""
 		}
@@ -215,13 +213,13 @@ func getRoomSubject(ctx context.Context, tableName string, roomId int) string {
 	return ""
 }
 
-func init() {
+func getConfig(ctx context.Context) aws.Config {
 	var err error
-	cfg, err = external.LoadDefaultAWSConfig()
-	cfg.Region = os.Getenv("REGION")
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(os.Getenv("REGION")))
 	if err != nil {
 		log.Print(err)
 	}
+	return cfg
 }
 
 func main() {
