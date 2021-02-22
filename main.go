@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"bytes"
+	"embed"
 	"context"
 	"strconv"
 	"html/template"
@@ -53,6 +54,9 @@ type MessageData struct {
 
 type Response events.APIGatewayProxyResponse
 
+//go:embed templates
+var templateFS embed.FS
+
 var dynamodbClient *dynamodb.Client
 
 const layout string = "2006-01-02 15:04"
@@ -91,7 +95,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 			dat.RoomList = []RoomData{}
 			sort.Slice(dat.MessageList, func(i, j int) bool { return dat.MessageList[i].Created < dat.MessageList[j].Created })
 		}
-		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/message.html"))
+		templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/message.html"))
 	} else {
 		dat.Title = title
 		dat.RoomId = 0
@@ -100,7 +104,7 @@ func HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (
 		dat.MessageList = []MessageData{}
 		dat.RoomList, err = getRoomList(ctx, os.Getenv("ROOM_TABLE_NAME"))
 		sort.Slice(dat.RoomList, func(i, j int) bool { return dat.RoomList[i].Updated > dat.RoomList[j].Updated })
-		templates = template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/room.html"))
+		templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/index.html", "templates/view.html", "templates/header.html", "templates/footer.html", "templates/pager.html", "templates/room.html"))
 	}
 	if err != nil {
 		log.Print(err)
