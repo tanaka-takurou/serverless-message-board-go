@@ -44,11 +44,13 @@ Resources:
   FrontPageFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Architectures:
+      - arm64
       FunctionName: ServerlessMessageBoardFrontFunction
       CodeUri: bin/
-      Handler: main
+      Handler: bootstrap
       MemorySize: 256
-      Runtime: go1.x
+      Runtime: provided.al2
       Description: 'Test Front Function'
       Policies:
       - DynamoDBCrudPolicy:
@@ -75,11 +77,13 @@ Resources:
   MessageFunction:
     Type: AWS::Serverless::Function
     Properties:
+      Architectures:
+      - arm64
       FunctionName: ServerlessMessageBoardApiFunction
       CodeUri: api/bin/
-      Handler: main
+      Handler: bootstrap
       MemorySize: 256
-      Runtime: go1.x
+      Runtime: provided.al2
       Description: 'Test Message Function'
       Policies:
       - DynamoDBCrudPolicy:
